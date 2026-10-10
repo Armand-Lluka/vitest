@@ -1,19 +1,27 @@
-import type { Environment } from 'vitest/environments';
+import type { WorkerGlobalState } from 'vitest';
 import type { EnvironmentStencil } from './types.js';
 
+// WorkerGlobalState exposes Environment from the same entry point in Vitest 2–5.
+type Environment = WorkerGlobalState['environment'];
+
 // Dynamically import populateGlobal to support both vitest 4.1+ (vitest/runtime) and older versions (vitest/environments)
-async function getPopulateGlobal() {
+async function getEnvironmentApi() {
   try {
     // Use variable to prevent Vite's static import analysis from failing on older vitest
     const runtimePath = 'vitest/' + 'runtime';
-    return (await import(/* @vite-ignore */ runtimePath)).populateGlobal;
+    const { populateGlobal } = await import(/* @vite-ignore */ runtimePath);
+    return { populateGlobal, viteEnvironment: 'ssr' as const };
   } catch {
-    return (await import('vitest/environments')).populateGlobal;
+    const legacyPath = 'vitest/' + 'environments';
+    const { populateGlobal } = await import(/* @vite-ignore */ legacyPath);
+    return { populateGlobal, transformMode: 'ssr' as const };
   }
 }
 import happyDom from './env/happy-dom.js';
 import jsdom from './env/jsdom.js';
 import mockDoc from './env/mock-doc.js';
+
+const { populateGlobal, ...environmentOptions } = await getEnvironmentApi();
 
 export interface StencilEnvironmentOptions {
   /**
@@ -46,9 +54,9 @@ const environmentMap: Record<string, EnvironmentStencil> = {
  * })
  * ```
  */
-export default <Environment>{
+const environment: Environment = {
   name: 'stencil',
-  viteEnvironment: 'ssr',
+  ...environmentOptions,
 
   async setup(global, options) {
     const { stencil = {} } = options as { stencil?: StencilEnvironmentOptions };
@@ -86,8 +94,15 @@ export default <Environment>{
       win.process.env.NODE_ENV = 'test';
     }
 
+    // Vitest 2–4 store values in originals; Vitest 5 stores descriptors.
+    // Capture descriptors ourselves so both preserve the native globals.
+    const originalDescriptors: PropertyDescriptorMap = Object.getOwnPropertyDescriptors(global);
+    const restoreGlobal = (key: string | symbol) => {
+      const descriptor = originalDescriptors[key];
+      if (descriptor) Object.defineProperty(global, key, descriptor);
+    };
+
     // Populate global with window properties
-    const populateGlobal = await getPopulateGlobal();
     const { keys, originals } = populateGlobal(global, win, {
       bindFunctions: true,
     });
@@ -95,7 +110,7 @@ export default <Environment>{
     // Restore Node's native Event constructor (chai needs this)
     // CustomEvent can stay as mock-doc's version since it's needed for event creation
     if (originals.has('Event')) {
-      (global as any).Event = originals.get('Event');
+      restoreGlobal('Event');
     }
 
     // Create HTMLElement wrapper that captures ownerDocument
@@ -104,7 +119,7 @@ export default <Environment>{
     // super() with no args (standard browser behavior). This wrapper bridges the gap.
     const MockHTMLElementBase = (global as any).HTMLElement;
     const doc = win.document;
-    (global as any).HTMLElement = class extends MockHTMLElementBase {
+    const HTMLElement = class extends MockHTMLElementBase {
       constructor() {
         super(doc, '');
         const observedAttributes = (this.constructor as any).observedAttributes;
@@ -118,11 +133,12 @@ export default <Environment>{
         }
       }
     };
+    Object.defineProperty(global, 'HTMLElement', { value: HTMLElement, writable: true, configurable: true });
 
     // Remove undefined properties that shadow native globals
     keys.forEach((key) => {
       if ((global as any)[key] === undefined && originals.has(key)) {
-        (global as any)[key] = originals.get(key);
+        restoreGlobal(key);
       }
     });
 
@@ -135,8 +151,10 @@ export default <Environment>{
 
         // Then clean up populated globals
         keys.forEach((key) => delete (global as any)[key]);
-        originals.forEach((v, k) => ((global as any)[k] = v));
+        originals.forEach((_, key) => restoreGlobal(key));
       },
     };
   },
 };
+
+export default environment;
