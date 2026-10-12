@@ -16,10 +16,12 @@ const vitestMajor = Number.parseInt(require('vitest/package.json').version, 10);
 const environmentOptions = vitestMajor >= 4 ? { viteEnvironment: 'ssr' as const } : { transformMode: 'ssr' as const };
 
 // populateGlobal lives in vitest/runtime from Vitest 4.1 and in vitest/environments before that (removed in Vitest 5).
-// Resolve the entry with Node and import it by absolute URL: a bare specifier Vite cannot analyze is
-// mis-resolved against the cwd by Vitest 5's module runner on Windows, and an analyzable one fails
-// on the Vitest versions that lack the entry.
+// The specifiers are variables because Vite fails to analyze an entry the installed Vitest lacks.
+// The file URL is a fallback for Vitest 5 on Windows, whose two module runners each mishandle one form:
+// the one that loads environments rejects the URL, and the one that runs test code (where this module
+// ends up when it is imported directly) resolves the bare specifier against the cwd.
 async function getPopulateGlobal() {
+  let error: unknown;
   for (const entry of ['vitest/runtime', 'vitest/environments']) {
     let resolved: string;
     try {
@@ -27,9 +29,17 @@ async function getPopulateGlobal() {
     } catch {
       continue;
     }
-    return (await import(/* @vite-ignore */ pathToFileURL(resolved).href)).populateGlobal;
+    for (const specifier of [entry, pathToFileURL(resolved).href]) {
+      try {
+        return (await import(/* @vite-ignore */ specifier)).populateGlobal;
+      } catch (e) {
+        error ??= e;
+      }
+    }
   }
-  throw new Error('@stencil/vitest: could not find populateGlobal in the installed version of vitest');
+  throw new Error('@stencil/vitest: could not load populateGlobal from the installed version of vitest', {
+    cause: error,
+  });
 }
 
 export interface StencilEnvironmentOptions {
