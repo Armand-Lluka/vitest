@@ -38,7 +38,7 @@ pnpm test:types
 pnpm test:e2e
 ```
 
-CI also installs the packed adapter in isolated consumers using each supported Vitest major to check its environment and matcher declarations. The engine check excludes Vitest's own Node requirement because it varies by major; consumers must meet the requirements of their chosen Vitest version.
+CI also installs the packed adapter in isolated consumers using each supported Vitest major to check its environment and matcher declarations.
 
 ### 5. Run code quality checks
 
