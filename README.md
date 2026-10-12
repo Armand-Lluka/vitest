@@ -42,6 +42,8 @@ First-class testing utilities for Stencil components, powered by Vitest.
 npm i --save-dev @stencil/vitest vitest
 ```
 
+Requires Node.js `^22.12.0 || ^24.0.0 || >=26.0.0`. Vitest 2, 3, 4, and 5 are supported; Vitest 5 also requires Vite `^6.4.0 || ^7.0.0 || ^8.0.0`. See the [Vitest migration guide](https://vitest.dev/guide/migration) when upgrading an existing project.
+
 For browser testing, also install:
 
 ```bash
