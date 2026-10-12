@@ -1,27 +1,36 @@
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import type { WorkerGlobalState } from 'vitest';
 import type { EnvironmentStencil } from './types.js';
-
-// WorkerGlobalState exposes Environment from the same entry point in Vitest 2–5.
-type Environment = WorkerGlobalState['environment'];
-
-// Dynamically import populateGlobal to support both vitest 4.1+ (vitest/runtime) and older versions (vitest/environments)
-async function getEnvironmentApi() {
-  try {
-    // Use variable to prevent Vite's static import analysis from failing on older vitest
-    const runtimePath = 'vitest/' + 'runtime';
-    const { populateGlobal } = await import(/* @vite-ignore */ runtimePath);
-    return { populateGlobal, viteEnvironment: 'ssr' as const };
-  } catch {
-    const legacyPath = 'vitest/' + 'environments';
-    const { populateGlobal } = await import(/* @vite-ignore */ legacyPath);
-    return { populateGlobal, transformMode: 'ssr' as const };
-  }
-}
 import happyDom from './env/happy-dom.js';
 import jsdom from './env/jsdom.js';
 import mockDoc from './env/mock-doc.js';
 
-const { populateGlobal, ...environmentOptions } = await getEnvironmentApi();
+// WorkerGlobalState exposes Environment from the same entry point in Vitest 2–5.
+type Environment = WorkerGlobalState['environment'];
+
+const require = createRequire(import.meta.url);
+
+// Vitest 4 replaced `transformMode` with `viteEnvironment` and warns when the old field is still set.
+const vitestMajor = Number.parseInt(require('vitest/package.json').version, 10);
+const environmentOptions = vitestMajor >= 4 ? { viteEnvironment: 'ssr' as const } : { transformMode: 'ssr' as const };
+
+// populateGlobal lives in vitest/runtime from Vitest 4.1 and in vitest/environments before that (removed in Vitest 5).
+// Resolve the entry with Node and import it by absolute URL: a bare specifier Vite cannot analyze is
+// mis-resolved against the cwd by Vitest 5's module runner on Windows, and an analyzable one fails
+// on the Vitest versions that lack the entry.
+async function getPopulateGlobal() {
+  for (const entry of ['vitest/runtime', 'vitest/environments']) {
+    let resolved: string;
+    try {
+      resolved = require.resolve(entry);
+    } catch {
+      continue;
+    }
+    return (await import(/* @vite-ignore */ pathToFileURL(resolved).href)).populateGlobal;
+  }
+  throw new Error('@stencil/vitest: could not find populateGlobal in the installed version of vitest');
+}
 
 export interface StencilEnvironmentOptions {
   /**
@@ -103,6 +112,7 @@ const environment: Environment = {
     };
 
     // Populate global with window properties
+    const populateGlobal = await getPopulateGlobal();
     const { keys, originals } = populateGlobal(global, win, {
       bindFunctions: true,
     });
