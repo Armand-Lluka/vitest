@@ -2,7 +2,7 @@
 
 import { spawn, type ChildProcess } from 'child_process';
 import { existsSync, unlinkSync, writeFileSync } from 'fs';
-import { extname, join } from 'path';
+import { dirname, extname, join, resolve } from 'path';
 import { createJiti } from 'jiti';
 
 /**
@@ -57,6 +57,7 @@ function getCleanNpmEnv(extraEnv: Record<string, string> = {}): NodeJS.ProcessEn
  *   --serve              Start dev server (with --watch)
  *   --port <number>      Dev server port (with --serve)
  *   --stencil-config <path>  Path to stencil config file
+ *   --no-build           Skip the Stencil build and test the existing build output
  *   --verbose            Show detailed Stencil output
  *
  * Vitest options:
@@ -104,7 +105,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     verbose: false,
     debug: false,
     prod: false,
-    build: false,
+    build: true,
     coverage: false,
     noCoverage: false,
     ui: false,
@@ -274,6 +275,7 @@ Stencil Options:
   --serve                  Start dev server (requires --watch)
   --port <number>          Dev server port (default: 3333)
   --stencil-config <path>  Path to stencil config file
+  --no-build               Skip the Stencil build and test the existing build output
   --verbose, -v            Show detailed logging
   --debug                  Enable Stencil debug mode
 
@@ -297,6 +299,7 @@ Examples:
   stencil-test                           # Build once, test once
   stencil-test --watch                   # Watch mode with auto-testing
   stencil-test --watch --serve           # Watch mode with dev server
+  stencil-test --no-build button.spec.ts # Rerun a test against the existing build
   stencil-test button.spec.ts            # Test specific file
   stencil-test --project browser         # Test specific project
   stencil-test --watch --coverage        # Watch with coverage
@@ -716,6 +719,49 @@ async function createTemporaryStencilConfig(
   }
 }
 
+// Default directories of the output targets a Stencil build writes
+const BUILD_OUTPUT_DEFAULT_DIRS: Record<string, string> = {
+  dist: 'dist',
+  'dist-custom-elements': 'dist/components',
+  'dist-hydrate-script': 'hydrate',
+  www: 'www',
+};
+
+/**
+ * Checks whether a previous Stencil build left output for the tests to load.
+ * Only build output targets count, not docs or other generated files.
+ */
+async function hasStencilBuildOutput(userSpecifiedConfig?: string): Promise<boolean> {
+  const configPath = userSpecifiedConfig
+    ? join(cwd, userSpecifiedConfig)
+    : [join(cwd, 'stencil.config.ts'), join(cwd, 'stencil.config.js'), join(cwd, 'stencil.config.mjs')].find(
+        existsSync,
+      );
+  const rootDir = configPath ? dirname(configPath) : cwd;
+  let outputDirs = ['dist', 'www'];
+
+  if (configPath && existsSync(configPath)) {
+    try {
+      const jiti = createJiti(cwd, { interopDefault: true });
+      const userConfig: any = await jiti.import(configPath);
+      const actualConfig = userConfig.config || userConfig.default?.config || userConfig.default || userConfig;
+      const buildTargets = (actualConfig?.outputTargets || []).filter(
+        (target: any) => target.type in BUILD_OUTPUT_DEFAULT_DIRS,
+      );
+
+      if (buildTargets.length > 0) {
+        outputDirs = buildTargets.map((target: any) => target.dir || BUILD_OUTPUT_DEFAULT_DIRS[target.type]);
+      }
+    } catch (error) {
+      if (verbose) {
+        log(`Failed to load stencil config: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  return outputDirs.some((dir) => existsSync(resolve(rootDir, dir)));
+}
+
 let tempStencilConfigPath: string | null = null;
 
 /**
@@ -761,6 +807,18 @@ process.on('SIGTERM', () => cleanup());
 
 // Main async function to setup and start the processes
 (async () => {
+  // --no-build: test the existing build output without running Stencil
+  if (!args.build) {
+    if (!(await hasStencilBuildOutput(args.stencilConfig))) {
+      console.error('[stencil-test] No Stencil build output found. Run without --no-build to build first.');
+      process.exit(1);
+    }
+
+    log('Skipping Stencil build (--no-build)');
+    runTests();
+    return;
+  }
+
   // Extract vitest --config path if provided
   let vitestConfigPath: string | undefined;
   const configIndex = args.vitestArgs.indexOf('--config');

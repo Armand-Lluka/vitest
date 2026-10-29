@@ -708,6 +708,9 @@ stencil-test button.spec.ts
 
 # Test specific project
 stencil-test --project browser
+
+# Skip the Stencil build and test the existing build output
+stencil-test --no-build button.spec.ts
 ```
 
 ### Flags
@@ -718,6 +721,8 @@ The `stencil-test` CLI supports most of Stencil's CLI flags and all of Vitest CL
 - For full Vitest CLI flags, see [Vitest CLI docs](https://vitest.dev/guide/cli.html).
 
 Note: unlike a normal `stencil build` `stencil-vitest` runs in development mode by default for faster builds. Use `--prod` to test against a production build.
+
+Use `--no-build` to skip the Stencil build and run Vitest against the output of a previous build, for example when rerunning tests after editing only test files. It exits with an error if no build output exists. With `--watch`, only Vitest runs in watch mode, so run `stencil build --watch` separately if you also want rebuilds.
 
 ### Global Variables
 

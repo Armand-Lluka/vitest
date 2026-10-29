@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn } from 'child_process';
@@ -195,6 +195,65 @@ export const config = {
 
       // Should NOT create a temporary config in non-watch mode
       expect(result.stdout).not.toMatch(/Created temporary stencil config/);
+    });
+  });
+
+  describe('--no-build', () => {
+    beforeEach(() => {
+      const stencilConfig = `
+export const config = {
+  namespace: 'test',
+  outputTargets: [{ type: 'dist', dir: 'lib' }, { type: 'docs-readme', dir: 'docs' }]
+};
+`;
+      writeFileSync(join(testDir, 'stencil.config.ts'), stencilConfig);
+      writeFileSync(join(testDir, 'package.json'), JSON.stringify({ name: 'test', type: 'module' }));
+      // Docs output isn't a build, so it shouldn't count as existing build output
+      mkdirSync(join(testDir, 'docs'));
+    });
+
+    it('should list --no-build in help', async () => {
+      const result = await runCLI(['--help']);
+      expect(result.stdout).toContain('--no-build');
+    });
+
+    it('should exit with an error when no build output exists', async () => {
+      const result = await runCLIInDir(testDir, ['--no-build'], 5000);
+
+      expect(result.code).toBe(1);
+      expect(result.stderr).toMatch(/No Stencil build output found/);
+      expect(result.stdout).not.toMatch(/Building Stencil/);
+      expect(result.stdout).not.toMatch(/Running tests/);
+    });
+
+    it('should skip the Stencil build and run tests when build output exists', async () => {
+      mkdirSync(join(testDir, 'lib'));
+
+      const result = await runCLIInDir(testDir, ['--no-build'], 2000);
+
+      expect(result.stdout).toMatch(/Skipping Stencil build/);
+      expect(result.stdout).not.toMatch(/Building Stencil/);
+      expect(result.stdout).toMatch(/Running tests/);
+    });
+
+    it('should skip the Stencil build in watch mode', async () => {
+      mkdirSync(join(testDir, 'lib'));
+
+      const result = await runCLIInDir(testDir, ['--no-build', '--watch', '--verbose'], 2000);
+
+      expect(result.stdout).toMatch(/Skipping Stencil build/);
+      expect(result.stdout).not.toMatch(/Starting Stencil in watch mode/);
+      expect(result.stdout).not.toMatch(/Created temporary stencil config/);
+      expect(result.stdout).toMatch(/Running tests/);
+    });
+
+    it('should still build without --no-build', async () => {
+      mkdirSync(join(testDir, 'lib'));
+
+      const result = await runCLIInDir(testDir, [], 2000);
+
+      expect(result.stdout).toMatch(/Building Stencil/);
+      expect(result.stdout).not.toMatch(/Skipping Stencil build/);
     });
   });
 
