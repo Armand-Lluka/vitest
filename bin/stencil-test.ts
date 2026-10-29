@@ -719,11 +719,15 @@ async function createTemporaryStencilConfig(
   }
 }
 
-// Default directories of the output targets a Stencil build writes
+// Default directories of the output targets a Stencil build writes (v4 and v5)
 const BUILD_OUTPUT_DEFAULT_DIRS: Record<string, string> = {
   dist: 'dist',
   'dist-custom-elements': 'dist/components',
   'dist-hydrate-script': 'hydrate',
+  'loader-bundle': 'dist/loader-bundle',
+  standalone: 'dist/standalone',
+  ssr: 'dist/ssr',
+  'ssr-wasm': 'dist/ssr-wasm',
   www: 'www',
 };
 
@@ -733,11 +737,11 @@ const BUILD_OUTPUT_DEFAULT_DIRS: Record<string, string> = {
  */
 async function hasStencilBuildOutput(userSpecifiedConfig?: string): Promise<boolean> {
   const configPath = userSpecifiedConfig
-    ? join(cwd, userSpecifiedConfig)
+    ? resolve(cwd, userSpecifiedConfig)
     : [join(cwd, 'stencil.config.ts'), join(cwd, 'stencil.config.js'), join(cwd, 'stencil.config.mjs')].find(
         existsSync,
       );
-  const rootDir = configPath ? dirname(configPath) : cwd;
+  let rootDir = configPath ? dirname(configPath) : cwd;
   let outputDirs = ['dist', 'www'];
 
   if (configPath && existsSync(configPath)) {
@@ -745,6 +749,10 @@ async function hasStencilBuildOutput(userSpecifiedConfig?: string): Promise<bool
       const jiti = createJiti(cwd, { interopDefault: true });
       const userConfig: any = await jiti.import(configPath);
       const actualConfig = userConfig.config || userConfig.default?.config || userConfig.default || userConfig;
+      // Stencil resolves output directories against rootDir, which defaults to the config's directory
+      if (typeof actualConfig?.rootDir === 'string') {
+        rootDir = resolve(rootDir, actualConfig.rootDir);
+      }
       const buildTargets = (actualConfig?.outputTargets || []).filter(
         (target: any) => target.type in BUILD_OUTPUT_DEFAULT_DIRS,
       );

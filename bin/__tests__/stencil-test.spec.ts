@@ -255,6 +255,55 @@ export const config = {
       expect(result.stdout).toMatch(/Building Stencil/);
       expect(result.stdout).not.toMatch(/Skipping Stencil build/);
     });
+
+    it('should find build output with an absolute --stencil-config path', async () => {
+      mkdirSync(join(testDir, 'lib'));
+
+      const result = await runCLIInDir(
+        testDir,
+        ['--no-build', '--stencil-config', join(testDir, 'stencil.config.ts')],
+        2000,
+      );
+
+      expect(result.stdout).toMatch(/Skipping Stencil build/);
+    });
+
+    it('should resolve output directories against rootDir', async () => {
+      writeFileSync(
+        join(testDir, 'stencil.config.ts'),
+        `export const config = { rootDir: 'app', outputTargets: [{ type: 'dist', dir: 'lib' }] };`,
+      );
+      mkdirSync(join(testDir, 'app', 'lib'), { recursive: true });
+
+      const result = await runCLIInDir(testDir, ['--no-build'], 2000);
+
+      expect(result.stdout).toMatch(/Skipping Stencil build/);
+    });
+
+    it('should find Stencil v5 loader-bundle output', async () => {
+      writeFileSync(
+        join(testDir, 'stencil.config.ts'),
+        `export const config = { outputTargets: [{ type: 'loader-bundle', dir: 'out' }] };`,
+      );
+      mkdirSync(join(testDir, 'out'));
+
+      const result = await runCLIInDir(testDir, ['--no-build'], 2000);
+
+      expect(result.stdout).toMatch(/Skipping Stencil build/);
+    });
+
+    it('should not treat a missing Stencil v5 standalone directory as build output', async () => {
+      writeFileSync(
+        join(testDir, 'stencil.config.ts'),
+        `export const config = { outputTargets: [{ type: 'standalone' }] };`,
+      );
+      mkdirSync(join(testDir, 'dist'));
+
+      const result = await runCLIInDir(testDir, ['--no-build'], 5000);
+
+      expect(result.code).toBe(1);
+      expect(result.stderr).toMatch(/No Stencil build output found/);
+    });
   });
 
   describe('screenshot ignore patterns', () => {
